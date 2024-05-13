@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,9 +25,19 @@ func main() {
 		fmt.Println("Scrape error:", err)
 		return
 	}
-	for _, shocker := range volumeShockers {
-		fmt.Printf("Name: %s, LTP : %.2f, Change: %.2f%%, Volume Multiple: %.2f\n", shocker.Name, shocker.LTp, shocker.ChangePercent, shocker.VolumeMultiple)
-	}
+
+	// Sorting by ChangePercent
+	sort.Slice(volumeShockers, func(i, j int) bool {
+		return volumeShockers[i].ChangePercent > volumeShockers[j].ChangePercent
+	})
+
+	limitTop(&volumeShockers, 3)
+
+	sort.Slice(volumeShockers, func(i, j int) bool {
+		return volumeShockers[i].VolumeMultiple > volumeShockers[j].VolumeMultiple
+	})
+
+	fmt.Println("Sorted by ChangePercent:", volumeShockers)
 }
 
 func scrapeVolumeShockers(url string) ([]VolumeShockerStock, error) {
@@ -106,4 +117,11 @@ func parseLTP(text string) (float64, error) {
 		return 0, fmt.Errorf("parse error: could not parse ltp in text err: %v", err)
 	}
 	return ltp, nil
+}
+
+// limitTop modifies the slice pointer to keep only the top 5 elements.
+func limitTop(stocks *[]VolumeShockerStock, limit int8) {
+	if len(*stocks) > int(limit) {
+		*stocks = (*stocks)[:limit]
+	}
 }
