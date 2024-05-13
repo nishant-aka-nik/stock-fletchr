@@ -37,7 +37,6 @@ func main() {
 		return volumeShockers[i].ChangePercent > volumeShockers[j].ChangePercent
 	})
 
-	//TODO: add limit in config
 	limitTop(&volumeShockers, config.AppConfig.Limit)
 
 	sort.Slice(volumeShockers, func(i, j int) bool {
