@@ -12,6 +12,7 @@ import (
 
 type VolumeShockerStock struct {
 	Name           string
+	LTp            float64
 	ChangePercent  float64
 	VolumeMultiple float64
 }
@@ -24,7 +25,7 @@ func main() {
 		return
 	}
 	for _, shocker := range volumeShockers {
-		fmt.Printf("Name: %s, Change: %.2f%%, Volume Multiple: %.2f\n", shocker.Name, shocker.ChangePercent, shocker.VolumeMultiple)
+		fmt.Printf("Name: %s, LTP : %.2f, Change: %.2f%%, Volume Multiple: %.2f\n", shocker.Name, shocker.LTp, shocker.ChangePercent, shocker.VolumeMultiple)
 	}
 }
 
@@ -49,13 +50,16 @@ func scrapeVolumeShockers(url string) ([]VolumeShockerStock, error) {
 		})
 
 		if len(columns) > 5 {
+			ltp, errLTP := parseLTP(columns[1])
 			changePercent, errCP := parseChangePercent(columns[2])
 			volumeMultiple, errVM := parseVolumeMultiple(columns[5])
-			if errCP == nil && errVM == nil {
+
+			if errCP == nil && errVM == nil && errLTP == nil {
 				volumeShockers = append(volumeShockers, VolumeShockerStock{
 					Name:           columns[0],
 					ChangePercent:  changePercent,
 					VolumeMultiple: volumeMultiple,
+					LTp:            ltp,
 				})
 			}
 		}
@@ -94,4 +98,12 @@ func parseVolumeMultiple(text string) (float64, error) {
 		return strconv.ParseFloat(match[0], 64)
 	}
 	return 0, fmt.Errorf("parse error: could not find volume multiple in text")
+}
+
+func parseLTP(text string) (float64, error) {
+	ltp, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse error: could not parse ltp in text err: %v", err)
+	}
+	return ltp, nil
 }
