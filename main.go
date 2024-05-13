@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fletcher/config"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -12,33 +14,50 @@ import (
 
 type VolumeShockerStock struct {
 	Name           string
+	LTp            float64
 	ChangePercent  float64
 	VolumeMultiple float64
 }
 
 func main() {
-	volumeShockers, err := scrapeVolumeShockers("https://trendlyne.com/stock-screeners/volume-based/high-volume-stocks/top-gainers/today/index/BSE500/")
+	err := config.LoadConfig()
+	if err != nil {
+		fmt.Println("Failed to load config:", err)
+		return
+	}
+
+	volumeShockers, err := scrapeVolumeShockers(config.AppConfig.ScrapeURL)
 	if err != nil {
 		fmt.Println("Scrape error:", err)
 		return
 	}
-	for _, shocker := range volumeShockers {
-		fmt.Printf("Name: %s, Change: %.2f%%, Volume Multiple: %.2f\n", shocker.Name, shocker.ChangePercent, shocker.VolumeMultiple)
-	}
+
+	// Sorting by ChangePercent
+	sort.Slice(volumeShockers, func(i, j int) bool {
+		return volumeShockers[i].ChangePercent > volumeShockers[j].ChangePercent
+	})
+
+	limitTop(&volumeShockers, config.AppConfig.Limit)
+
+	sort.Slice(volumeShockers, func(i, j int) bool {
+		return volumeShockers[i].VolumeMultiple > volumeShockers[j].VolumeMultiple
+	})
+
+	fmt.Println("Sorted by ChangePercent:", volumeShockers)
 }
 
 func scrapeVolumeShockers(url string) ([]VolumeShockerStock, error) {
 	var volumeShockers []VolumeShockerStock
 
 	c := colly.NewCollector(
-		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"),
+		colly.UserAgent(config.AppConfig.Colly.UserAgent),
 		colly.Async(false),
 		colly.AllowURLRevisit(),
 	)
 
 	c.Limit(&colly.LimitRule{
-		Delay:       2 * time.Second,
-		RandomDelay: 2 * time.Second,
+		Delay:       time.Duration(config.AppConfig.Colly.DelaySeconds) * time.Second,
+		RandomDelay: time.Duration(config.AppConfig.Colly.RandomDelaySeconds) * time.Second,
 	})
 
 	c.OnHTML("table tr", func(e *colly.HTMLElement) {
@@ -48,13 +67,16 @@ func scrapeVolumeShockers(url string) ([]VolumeShockerStock, error) {
 		})
 
 		if len(columns) > 5 {
+			ltp, errLTP := parseLTP(columns[1])
 			changePercent, errCP := parseChangePercent(columns[2])
 			volumeMultiple, errVM := parseVolumeMultiple(columns[5])
-			if errCP == nil && errVM == nil {
+
+			if errCP == nil && errVM == nil && errLTP == nil {
 				volumeShockers = append(volumeShockers, VolumeShockerStock{
 					Name:           columns[0],
 					ChangePercent:  changePercent,
 					VolumeMultiple: volumeMultiple,
+					LTp:            ltp,
 				})
 			}
 		}
@@ -93,4 +115,19 @@ func parseVolumeMultiple(text string) (float64, error) {
 		return strconv.ParseFloat(match[0], 64)
 	}
 	return 0, fmt.Errorf("parse error: could not find volume multiple in text")
+}
+
+func parseLTP(text string) (float64, error) {
+	ltp, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse error: could not parse ltp in text err: %v", err)
+	}
+	return ltp, nil
+}
+
+// limitTop modifies the slice pointer to keep only the top 5 elements.
+func limitTop(stocks *[]VolumeShockerStock, limit int8) {
+	if len(*stocks) > int(limit) {
+		*stocks = (*stocks)[:limit]
+	}
 }
