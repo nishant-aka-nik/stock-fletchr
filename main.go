@@ -17,6 +17,7 @@ type VolumeShockerStock struct {
 }
 
 func main() {
+	//TODO: url needs to be given in config
 	volumeShockers, err := scrapeVolumeShockers("https://trendlyne.com/stock-screeners/volume-based/high-volume-stocks/top-gainers/today/index/BSE500/")
 	if err != nil {
 		fmt.Println("Scrape error:", err)
