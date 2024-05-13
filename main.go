@@ -26,7 +26,7 @@ func main() {
 		return
 	}
 
-	volumeShockers, err := scrapeVolumeShockers("https://trendlyne.com/stock-screeners/volume-based/high-volume-stocks/top-gainers/today/index/BSE500/")
+	volumeShockers, err := scrapeVolumeShockers(config.AppConfig.ScrapeURL)
 	if err != nil {
 		fmt.Println("Scrape error:", err)
 		return
@@ -38,7 +38,7 @@ func main() {
 	})
 
 	//TODO: add limit in config
-	limitTop(&volumeShockers, 3)
+	limitTop(&volumeShockers, config.AppConfig.Limit)
 
 	sort.Slice(volumeShockers, func(i, j int) bool {
 		return volumeShockers[i].VolumeMultiple > volumeShockers[j].VolumeMultiple
@@ -51,14 +51,14 @@ func scrapeVolumeShockers(url string) ([]VolumeShockerStock, error) {
 	var volumeShockers []VolumeShockerStock
 
 	c := colly.NewCollector(
-		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"),
+		colly.UserAgent(config.AppConfig.Colly.UserAgent),
 		colly.Async(false),
 		colly.AllowURLRevisit(),
 	)
 
 	c.Limit(&colly.LimitRule{
-		Delay:       2 * time.Second,
-		RandomDelay: 2 * time.Second,
+		Delay:       time.Duration(config.AppConfig.Colly.DelaySeconds) * time.Second,
+		RandomDelay: time.Duration(config.AppConfig.Colly.RandomDelaySeconds) * time.Second,
 	})
 
 	c.OnHTML("table tr", func(e *colly.HTMLElement) {

@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	ScrapeURL string `json:"scrapeURL"`
+	Limit     int8   `json:"limit"`
 	Colly     Colly  `json:"colly"`
 }
 

@@ -1,4 +1,5 @@
 {
+    "limit": 5,
     "scrapeURL": "https://trendlyne.com/stock-screeners/volume-based/high-volume-stocks/top-gainers/today/index/BSE500/",
     "colly": {
         "delaySeconds": 2,
