@@ -2,148 +2,95 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gocolly/colly"
 )
 
-type Response struct {
-	Name        string
-	PageUrl     string
-	DownloadUrl string
+type VolumeShockerStock struct {
+	Name           string
+	ChangePercent  float64
+	VolumeMultiple float64
 }
 
-const dirPath = "./torFiles/"
-
 func main() {
-	responses := map[string]*Response{}
+	volumeShockers, err := scrapeVolumeShockers("https://trendlyne.com/stock-screeners/volume-based/high-volume-stocks/top-gainers/today/index/BSE500/")
+	if err != nil {
+		fmt.Println("Scrape error:", err)
+		return
+	}
+	for _, shocker := range volumeShockers {
+		fmt.Printf("Name: %s, Change: %.2f%%, Volume Multiple: %.2f\n", shocker.Name, shocker.ChangePercent, shocker.VolumeMultiple)
+	}
+}
 
-	torMeta := &Response{}
-	// Create a new collector with options to mimic a browser
+func scrapeVolumeShockers(url string) ([]VolumeShockerStock, error) {
+	var volumeShockers []VolumeShockerStock
+
 	c := colly.NewCollector(
 		colly.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36"),
-		colly.Async(false), // Enable asynchronous requests
+		colly.Async(false),
+		colly.AllowURLRevisit(),
 	)
 
-	listCollector := c.Clone()
-	linkCollector := c.Clone()
-
-	// Limit the rate of requests
 	c.Limit(&colly.LimitRule{
-		Delay:       2 * time.Second, // time between requests to the same domain
-		RandomDelay: 2 * time.Second, // random delay added to the delay
+		Delay:       2 * time.Second,
+		RandomDelay: 2 * time.Second,
 	})
 
-	// On every <a> element
-	listCollector.OnHTML("a", func(e *colly.HTMLElement) {
-		linkHref := e.Request.AbsoluteURL(e.Attr("href")) // Convert relative URL to absolute URL
-		// Check if the link contains the specific substring
-		if strings.Contains(linkHref, "/torrents/details/") && strings.Contains(e.Text, "720p") {
-			linkText := strings.Replace(e.Text, " ", "_", -1)
+	c.OnHTML("table tr", func(e *colly.HTMLElement) {
+		var columns []string
+		e.ForEach("td", func(_ int, el *colly.HTMLElement) {
+			columns = append(columns, strings.TrimSpace(el.Text))
+		})
 
-			fmt.Printf("Target Link found: %q -> %s\n", linkText, linkHref)
-			torMeta = &Response{
-				Name:    linkText,
-				PageUrl: linkHref,
+		if len(columns) > 5 {
+			changePercent, errCP := parseChangePercent(columns[2])
+			volumeMultiple, errVM := parseVolumeMultiple(columns[5])
+			if errCP == nil && errVM == nil {
+				volumeShockers = append(volumeShockers, VolumeShockerStock{
+					Name:           columns[0],
+					ChangePercent:  changePercent,
+					VolumeMultiple: volumeMultiple,
+				})
 			}
-			responses[linkText] = torMeta
 		}
 	})
 
-	// On every <a> element with the title "Click here to download torrent"
-
-	// Before making a request print "Visiting ..."
-	listCollector.OnRequest(func(r *colly.Request) {
+	c.OnRequest(func(r *colly.Request) {
 		fmt.Println("Visiting", r.URL.String())
 	})
 
-	listCollector.OnScraped(func(r *colly.Response) {
-		fmt.Println("Scraped", r.Request.URL.String())
-		for key := range responses {
-			x := responses[key].PageUrl
-			torMeta = responses[key]
-			filepath, _ := filepath.Abs(dirPath + torMeta.Name + ".torrent")
-			_, err := os.Stat(filepath)
-
-			if err == nil {
-				fmt.Printf("File %s already exists. Skipping...\n", torMeta.Name)
-				continue
-			}
-			linkCollector.Visit(x)
-		}
+	c.OnError(func(r *colly.Response, err error) {
+		fmt.Println("Request URL:", r.Request.URL, "failed with response:", r, "Error:", err)
 	})
 
-	linkCollector.OnHTML(`a[title="Click here to download torrent"]`, func(e *colly.HTMLElement) {
-		linkHref := e.Request.AbsoluteURL(e.Attr("href"))
-		torMeta.DownloadUrl = linkHref
-		torFileName := strings.Replace(torMeta.Name, " ", "_", -1)
-		responses[torFileName] = torMeta
-		fmt.Printf("Link for download: %s\n", linkHref)
-	})
+	err := c.Visit(url)
+	if err != nil {
+		return nil, err
+	}
+	c.Wait()
 
-	linkCollector.OnScraped(func(r *colly.Response) {
-		fmt.Println("Scraped", r.Request.URL.String())
-		fmt.Println("Download URL: ", torMeta.DownloadUrl)
+	return volumeShockers, nil
+}
 
-		client := &http.Client{}
+func parseChangePercent(text string) (float64, error) {
+	re := regexp.MustCompile(`\((\d+\.\d+) %\)`)
+	match := re.FindStringSubmatch(text)
+	if len(match) > 1 {
+		return strconv.ParseFloat(match[1], 64)
+	}
+	return 0, fmt.Errorf("parse error: could not find change percent in text")
+}
 
-		// Create a new request
-		req, err := http.NewRequest("GET", torMeta.DownloadUrl, nil)
-		if err != nil {
-			panic(err)
-		}
-
-		// Set User-Agent header
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36")
-
-		// Send the request
-		response, err := client.Do(req)
-		if err != nil {
-			panic(err)
-		}
-		defer response.Body.Close()
-
-		if response.StatusCode != http.StatusOK {
-			panic("Failed to download file: " + response.Status)
-		}
-
-		torFileName := strings.Replace(torMeta.Name, " ", "_", -1)
-		filePath := fmt.Sprintf("%s%s.torrent", dirPath, torFileName)
-
-		// Check if the directory exists, create if not
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-				panic(err)
-			}
-		}
-
-		outFile, err := os.Create(filePath)
-		if err != nil {
-			panic(err)
-		}
-		defer outFile.Close()
-
-		_, err = io.Copy(outFile, response.Body)
-		if err != nil {
-			panic(err)
-		}
-
-		println("File downloaded successfully.")
-	})
-
-	// Handle any errors
-	listCollector.OnError(func(r *colly.Response, err error) {
-		fmt.Println("Request URL:", r.Request.URL, "failed with response:", r, "\nError:", err)
-	})
-
-	// Start scraping on the desired page
-	listCollector.Visit("")
-
-	// Wait for asynchronous tasks to complete
-	listCollector.Wait()
+func parseVolumeMultiple(text string) (float64, error) {
+	re := regexp.MustCompile(`(\d+\.\d+)`)
+	match := re.FindStringSubmatch(text)
+	if len(match) > 0 {
+		return strconv.ParseFloat(match[0], 64)
+	}
+	return 0, fmt.Errorf("parse error: could not find volume multiple in text")
 }
